@@ -6,5 +6,8 @@ It is a Python 2.x incarnation of the same principle in [ZWUtils-Java](https://g
 # Acknowledgement
 I am grateful for NEC Laboratories America, Inc., for granting open source release of this library.
 
+# License
+BSD 3-clause New License
+
 # How to Use
 (Coming soon in wiki)
