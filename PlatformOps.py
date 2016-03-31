@@ -92,12 +92,15 @@ def GetOSVersions_Windows():
 
 def GetOSVersions_MacOSX():
 	global PROCESSOR
-	PROCESSOR = platform.machine()
+	PROCESSOR = platform.processor()
+	if PROCESSOR == 'i386':
+		PROCESSOR = ('i386','x86_64')[sys.maxsize.bit_length() > 32]
 	release = platform.release()
 	global PLATFORM,OS_NAME,OS_MAJORVER,OS_MINORVER
 	OS_NAME = PLATFORM
-	OS_MAJORVER = release
-	OS_MINORVER = None
+	NormalizeVer = re.match(r'([^.]*)\.(.*)', release)
+	OS_MAJORVER = NormalizeVer.group(1)
+	OS_MINORVER = NormalizeVer.group(2)
 	PLATFORM = "MacOS"
 
 OSInfo_PLATFORMS = {}
