@@ -92,9 +92,7 @@ def GetOSVersions_Windows():
 
 def GetOSVersions_MacOSX():
 	global PROCESSOR
-	PROCESSOR = platform.processor()
-	if PROCESSOR == 'i386':
-		PROCESSOR = ('i386','x86_64')[sys.maxsize.bit_length() > 32]
+	PROCESSOR = platform.machine()
 	release = platform.release()
 	global PLATFORM,OS_NAME,OS_MAJORVER,OS_MINORVER
 	OS_NAME = PLATFORM
@@ -148,7 +146,10 @@ def GetMachineUUID_Windows():
 	return wmi.WMI().Win32_ComputerSystemProduct()[0].UUID
 
 def GetMachineUUID_MacOS():
-	raise Exception("Implement Me!")
+	for Line in subprocess.check_output(["ioreg","-rd1","-c","IOPlatformExpertDevice"]).split('\n'):
+		if "IOPlatformUUID" in Line:
+			return Line.split('"')[3]
+	Log.Warn("Platform UUID not found (should not happen)")
 
 GetMachineUUID_PLATFORMS = {}
 GetMachineUUID_PLATFORMS['Linux'] = GetMachineUUID_Linux
@@ -177,7 +178,7 @@ def TellRoot_Windows():
 	return isRoot
 	
 def TellRoot_MacOS():
-	raise Exception("Implement Me!")
+	return TellRoot_Linux()
 
 TellRoot_PLATFORMS = {}
 TellRoot_PLATFORMS['Linux'] = TellRoot_Linux
@@ -275,7 +276,7 @@ def SingleInstance_Windows(lockfile_rel,required):
 	return Locked
 
 def SingleInstance_MacOS(lockfile_rel,required):
-	raise Exception("Implement Me!")
+	return SingleInstance_Linux(lockfile_rel,required)
 
 SingleInstance_PLATFORMS = {}
 SingleInstance_PLATFORMS['Linux'] = SingleInstance_Linux
@@ -303,7 +304,7 @@ def SingleInstance_Release_Windows(lockfile_rel):
 	return False
 
 def SingleInstance_Release_MacOS(lockfile_rel):
-	raise Exception("Implement Me!")
+	return SingleInstance_Release_Linux(lockfile_rel)
 
 SingleInstance_Release_PLATFORMS = {}
 SingleInstance_Release_PLATFORMS['Linux'] = SingleInstance_Release_Linux
@@ -318,7 +319,7 @@ def GeneratePID(pidfile_rel):
 	else:
 		raise Exception("Unsupported platform '%s' for PID file generation"%PLATFORM)
 
-def GeneratePID_Linux_Windows(pidfile_rel):
+def GeneratePID_Linux(pidfile_rel):
 	Succeed = False
 	PIDFile = os.path.abspath(pidfile_rel)
 	
@@ -341,12 +342,15 @@ def GeneratePID_Linux_Windows(pidfile_rel):
 		Log.LogExcept("Failed to create PID file '%s'"%pidfile_rel)
 	return Succeed
 
+def GeneratePID_Windows(pidfile_rel):
+	return GeneratePID_Linux(pidfile_rel)
+
 def GeneratePID_MacOS(pidfile_rel):
-	raise Exception("Implement Me!")
+	return GeneratePID_Linux(pidfile_rel)
 
 GeneratePID_PLATFORMS = {}
-GeneratePID_PLATFORMS['Linux'] = GeneratePID_Linux_Windows
-GeneratePID_PLATFORMS['Windows'] = GeneratePID_Linux_Windows
+GeneratePID_PLATFORMS['Linux'] = GeneratePID_Linux
+GeneratePID_PLATFORMS['Windows'] = GeneratePID_Windows
 GeneratePID_PLATFORMS['MacOS'] = GeneratePID_MacOS
 
 #----------------------------- Retrieve PID File -----------------------------
@@ -357,7 +361,7 @@ def RetrievePID(pidfile_rel):
 	else:
 		raise Exception("Unsupported platform '%s' for PID file retrieval"%PLATFORM)
 
-def RetrievePID_Linux_Windows(pidfile_rel):
+def RetrievePID_Linux(pidfile_rel):
 	PIDFile = os.path.abspath(pidfile_rel)
 	
 	PID = None
@@ -371,12 +375,15 @@ def RetrievePID_Linux_Windows(pidfile_rel):
 		Log.LogExcept("Failed to read PID file '%s'"%pidfile_rel)
 	return PID
 
+def RetrievePID_Windows(pidfile_rel):
+	return RetrievePID_Linux(pidfile_rel)
+
 def RetrievePID_MacOS(pidfile_rel):
-	raise Exception("Implement Me!")
+	return RetrievePID_Linux(pidfile_rel)
 
 RetrievePID_PLATFORMS = {}
-RetrievePID_PLATFORMS['Linux'] = RetrievePID_Linux_Windows
-RetrievePID_PLATFORMS['Windows'] = RetrievePID_Linux_Windows
+RetrievePID_PLATFORMS['Linux'] = RetrievePID_Linux
+RetrievePID_PLATFORMS['Windows'] = RetrievePID_Windows
 RetrievePID_PLATFORMS['MacOS'] = RetrievePID_MacOS
 
 #----------------------------- Remove PID File -----------------------------
@@ -387,7 +394,7 @@ def RemovePID(pidfile_rel):
 	else:
 		raise Exception("Unsupported platform '%s' for PID file removal"%PLATFORM)
 
-def RemovePID_Linux_Windows(pidfile_rel):
+def RemovePID_Linux(pidfile_rel):
 	Succeed = False
 	PIDFile = os.path.abspath(pidfile_rel)
 	
@@ -400,12 +407,15 @@ def RemovePID_Linux_Windows(pidfile_rel):
 			Log.LogExcept("Failed to remove PID file '%s'"%pidfile_rel)
 	return Succeed
 
+def RemovePID_Windows(pidfile_rel):
+	return RemovePID_Linux(pidfile_rel)
+
 def RemovePID_MacOS(pidfile_rel):
-	raise Exception("Implement Me!")
+	return RemovePID_Linux(pidfile_rel)
 
 RemovePID_PLATFORMS = {}
-RemovePID_PLATFORMS['Linux'] = RemovePID_Linux_Windows
-RemovePID_PLATFORMS['Windows'] = RemovePID_Linux_Windows
+RemovePID_PLATFORMS['Linux'] = RemovePID_Linux
+RemovePID_PLATFORMS['Windows'] = RemovePID_Windows
 RemovePID_PLATFORMS['MacOS'] = RemovePID_MacOS
 
 #--------------------------- Daemonize the Program ---------------------------
@@ -515,7 +525,7 @@ def Daemonize_Windows(callback):
 		raise Exception('Daemonization is achieved by running as a service')
 	
 def Daemonize_MacOS(callback):
-	raise Exception("Implement Me!")
+	Log.Warn('Daemonization is not required on this operating system')
 
 Daemonize_PLATFORMS = {}
 Daemonize_PLATFORMS['Linux'] = Daemonize_Linux
@@ -581,7 +591,7 @@ def RedirectStdIO_Windows(stdin,stdout,stderr):
 	return True
 	
 def RedirectStdIO_MacOS(stdin,stdout,stderr):
-	raise Exception("Implement Me!")
+	return RedirectStdIO_Linux(stdin,stdout,stderr)
 
 RedirectStdIO_PLATFORMS = {}
 RedirectStdIO_PLATFORMS['Linux'] = RedirectStdIO_Linux
@@ -599,7 +609,7 @@ def AlertableWait(key, waitsec):
 AlertHandleLock = threading.Lock()
 AlertHandles = {}
 
-def AlertableWait_Linux_Windows(key, waitsec):
+def AlertableWait_Linux(key, waitsec):
 	AlertHandleLock.acquire()
 	try:
 		if key in AlertHandles:
@@ -617,12 +627,15 @@ def AlertableWait_Linux_Windows(key, waitsec):
 		finally:
 			AlertHandleLock.release()
 
+def AlertableWait_Windows(key, waitsec):
+	return AlertableWait_Linux(key, waitsec)
+
 def AlertableWait_MacOS(key, waitsec):
-	raise Exception("Implement Me!")
+	return AlertableWait_Linux(key, waitsec)
 
 AlertableWait_PLATFORMS = {}
-AlertableWait_PLATFORMS['Linux'] = AlertableWait_Linux_Windows
-AlertableWait_PLATFORMS['Windows'] = AlertableWait_Linux_Windows
+AlertableWait_PLATFORMS['Linux'] = AlertableWait_Linux
+AlertableWait_PLATFORMS['Windows'] = AlertableWait_Windows
 AlertableWait_PLATFORMS['MacOS'] = AlertableWait_MacOS
 
 def WaitAlert(key):
@@ -631,7 +644,7 @@ def WaitAlert(key):
 	else:
 		raise Exception("Unsupported platform '%s' for wait alert"%PLATFORM)
 
-def WaitAlert_Linux_Windows(key):
+def WaitAlert_Linux(key):
 	AlertHandleLock.acquire()
 	try:
 		if key not in AlertHandles:
@@ -640,12 +653,15 @@ def WaitAlert_Linux_Windows(key):
 	finally:
 		AlertHandleLock.release()
 
+def WaitAlert_Windows(key):
+	return WaitAlert_Linux(key)
+
 def WaitAlert_MacOS():
-	raise Exception("Implement Me!")
+	return WaitAlert_Linux(key)
 
 WaitAlert_PLATFORMS = {}
-WaitAlert_PLATFORMS['Linux'] = WaitAlert_Linux_Windows
-WaitAlert_PLATFORMS['Windows'] = WaitAlert_Linux_Windows
+WaitAlert_PLATFORMS['Linux'] = WaitAlert_Linux
+WaitAlert_PLATFORMS['Windows'] = WaitAlert_Windows
 WaitAlert_PLATFORMS['MacOS'] = WaitAlert_MacOS
 	
 #=============================================================================
