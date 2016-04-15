@@ -176,7 +176,7 @@ def TellRoot_Windows():
 	isRoot = shell.IsUserAnAdmin()
 	Log.Fine("%s as an administrator"%("Not running","Running")[isRoot])
 	return isRoot
-	
+
 def TellRoot_MacOS():
 	return TellRoot_Linux()
 
