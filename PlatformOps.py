@@ -430,8 +430,14 @@ def Daemonize_Linux(callback):
 	if os.getpid() == os.getsid(0):
 		if os.fork() != 0:
 			os._exit(os.wait()[1])
+		else:
+			DebugLog.refreshPID()
 	os.setsid()
-	callback(os.fork() != 0)
+	if os.fork() != 0:
+		callback(True)
+	else:
+		DebugLog.refreshPID()
+		callback(False)
 
 def Daemonize_Windows():
 	# Platform dependent package, do not move to top!
