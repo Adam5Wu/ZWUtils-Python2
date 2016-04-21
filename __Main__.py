@@ -40,12 +40,12 @@ Log = None
 Config = None
 
 def __module_init():
+	import os
 	# For debugging only
 	#print >>sys.stderr, "Module init: %s [%s]"%(__name__,os.getcwd())
 	
 	if __name__ != "__main__":
 		raise Exception("This module must be the main module!")
-	import os
 	sys.path.append(os.getcwd())
 	
 	# Load configurations
