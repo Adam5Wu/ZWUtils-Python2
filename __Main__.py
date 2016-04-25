@@ -53,7 +53,7 @@ def __module_init():
 	import Config
 	
 	# Get the Main logger
-	from Utilities import DebugLog
+	from ZWUtils import DebugLog
 	global Log
 	Log = DebugLog.getLogger("Main")
 	Log.Fine("Initialized")
