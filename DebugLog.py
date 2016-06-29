@@ -57,7 +57,7 @@ DefLogTarget = None
 DefLogPID = None
 
 # Logging Configurations
-LOG_LEVEL = 'ERROR'
+LOG_LEVEL = 'WARNING'
 #LOG_LEVEL = 'NOTSET'
 LOG_TARGET = '>STDERR'
 LOG_FORMAT = '%(LGR_PID)s\t%(asctime)s\t%(LGR_name)s\t%(levelname)s\t%(message)s'
