@@ -98,12 +98,19 @@ if PlatformOps.PLATFORM == 'Linux':
 	import BaseHTTPServer
 	import SocketServer
 	import socket
+	
+	import os
+	import fcntl
+	import time
+	import threading
 
 	class HTTPServer(BaseHTTPServer.HTTPServer):
 		Log = None
 		CusVer = None
 		CommandHandlers = {}
 		RequestTable = {}
+		PendingRequest = {}
+		AcceptRequest = {}
 		Poll = select.poll()
 		class HTTPHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 			Log = None
@@ -123,16 +130,64 @@ if PlatformOps.PLATFORM == 'Linux':
 					self.Log.Warn("[%s] Could not find handler for command '%s'"%("%s:%s"%self.client_address,self.command))
 				raise AttributeError
 			def _setup(self):
-				pass
-			def handle(self):
 				self.close_connection = 0
-				self.server.RequestTable[self.SockFD] = self
-				self.server.Poll.register(self.SockFD,select.POLLIN)
+				self.server.PendingRequest[self.SockFD] = self
+			def handle(self):
+				self.handler = threading.Thread(target=self.greet, name="Greeting-%s:%s"%self.client_address)
+				self.handler.daemon = True
+				self.handler.start()
+			def greet(self):
+				try:
+					try:
+						if self.server.SSLContext:
+							connection = self.request
+							# Set the timeout to prevent blocking
+							connection.settimeout(self.timeout)
+							if self.server.AccpetNonSSL:
+								try:
+									handshake = connection.recv(4, socket.MSG_PEEK)
+									if len(handshake) < 1 or ord(handshake[0]) != 0x16:
+										# Non-SSL connection
+										self.SSLPeer = 'N/A'
+								except socket.timeout:
+									# No handshake received, assuming non-SSL
+									self.SSLPeer = 'N/A'
+							if self.SSLPeer is None:
+								self.Log.Fine("[%s] SSL handshaking..."%("%s:%s"%self.client_address))
+								# Turn off Nagle to speed up communication
+								connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, True)
+								self.request = self.server.SSLContext.wrap_socket(connection,server_side=True,do_handshake_on_connect=True)
+								# Set wrapper socket timeout
+								connection.settimeout(None)
+								self.request.settimeout(self.timeout)
+								# Really do the handshake
+								self.request.do_handshake()
+								if not self.disable_nagle_algorithm:
+									# Restore Nagle if necessary
+									connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, False)
+								self.Log.Fine("[%s] SSL checking peer certificate..."%("%s:%s"%self.client_address))
+								self.SSLPeer = self.request.getpeercert()
+								self.Log.Fine("[%s] SSL connected."%("%s:%s"%self.client_address))
+								if self.SSLPeer is None:
+									self.SSLPeer = {}
+						else:
+							self.SSLPeer = 'N/A'
+					finally:
+						self.dosetup()
+					# Connection established, wait to get served
+					del self.server.PendingRequest[self.SockFD]
+					self.server.AcceptRequest[self.SockFD] = self
+					# Ring the service bell
+					os.write(self.server.ReqSignal, '!')
+				except Exception,e:
+					self.Log.Warn("[%s] Failed to accept request connection - %s"%("%s:%s"%self.client_address,e))
+					self.close_connection = 1
 			def _finish(self):
 				pass
-			def teardown(self):
-				self.server.Poll.unregister(self.SockFD)
-				del self.server.RequestTable[self.SockFD]
+			def teardown(self, unreg):
+				if unreg:
+					self.server.Poll.unregister(self.SockFD)
+					del self.server.RequestTable[self.SockFD]
 				try:
 					self.dofinish()
 				except Exception,e:
@@ -140,33 +195,11 @@ if PlatformOps.PLATFORM == 'Linux':
 				self.server.close_handler(self)
 			def ServeRequest(self):
 				try:
-					if self.SSLPeer is None:
-						try:
-							if self.server.SSLContext:
-								if self.server.AccpetNonSSL:
-									handshake = self.request.recv(4, socket.MSG_PEEK)
-									if len(handshake) < 1:
-										raise Exception('Connection timedout')
-									if ord(handshake[0]) != 0x16:
-										# Non-SSL connection
-										self.SSLPeer = 'N/A'
-								if self.SSLPeer is None:
-									self.Log.Fine("SSL handshaking...")
-									self.request = self.server.SSLContext.wrap_socket(self.request,server_side=True)
-									self.Log.Fine("SSL checking peer certificate...")
-									self.SSLPeer = self.request.getpeercert()
-									self.Log.Fine("SSL connected...")
-									if self.SSLPeer is None:
-										self.SSLPeer = {}
-							else:
-								self.SSLPeer = 'N/A'
-						finally:
-							self.dosetup()
-					else:
-						self.handle_one_request()
+					self.Log.Info("[%s] Handling request..."%("%s:%s"%self.client_address))
+					self.handle_one_request()
 				except Exception,e:
 					self.Log.Warn("[%s] Failed to handle request - %s"%("%s:%s"%self.client_address,e))
-					self.close_connection = 1
+					self.close_connection = 2
 			def HandleCommands(self):
 				if 'Content-Length' in self.headers:
 					self.ContentLen = int(self.headers['Content-Length'])
@@ -212,8 +245,8 @@ if PlatformOps.PLATFORM == 'Linux':
 				RespMessage = self.RespHeading['Message'] if self.RespHeading['Message'] is not None else self.responses[self.RespHeading['Code']][0]
 				if self.RespHeading['Error']:
 					self.send_error(self.RespHeading['Code'],self.RespHeading['Message'])
-					self.Log.Warn("[%s:%s] %d %s"%(self.client_address[0],self.client_address[1],self.RespHeading['Code'],RespMessage))
-					self.close_connection = 2
+					self.Log.Warn("[%s] %d %s"%("%s:%s"%self.client_address,self.RespHeading['Code'],RespMessage))
+					self.close_connection = 3
 				else:
 					self.send_response(self.RespHeading['Code'],self.RespHeading['Message'])
 					# Prepare / check payload length header
@@ -258,13 +291,13 @@ if PlatformOps.PLATFORM == 'Linux':
 					self.Log.Warn("Header already ended")
 				else:
 					self.RespHeaders[''] = None
-		def __init__(self,addr='',port=80,cusver=None,protocol='1.0',resptimeout=None,nagle=False,
+		def __init__(self,addr='',port=80,cusver=None,protocol='1.0',timeout=None,nagle=False,
 					 sslcontext=None,nonsslfallback=False):
 			self.Log = DebugLog.getLogger("HTTPServer")
 			if cusver is not None:
 				self.HTTPHandler.server_version = cusver[0]+'/'+cusver[1]
 				self.HTTPHandler.sys_version = PlatformOps.OS_NAME+'/'+PlatformOps.OS_MAJORVER
-			self.HTTPHandler.timeout = resptimeout
+			self.HTTPHandler.timeout = timeout
 			self.HTTPHandler.protocol_version = 'HTTP/'+protocol
 			self.HTTPHandler.disable_nagle_algorithm = not nagle
 			BaseHTTPServer.HTTPServer.__init__(self,(addr,port),self.HTTPHandler)
@@ -272,24 +305,42 @@ if PlatformOps.PLATFORM == 'Linux':
 			self.AccpetNonSSL = nonsslfallback
 			self.SockFD = self.socket.fileno()
 			self.Poll.register(self.SockFD,select.POLLIN)
-		def handle_request(self):
+			self.ReqAck, self.ReqSignal = os.pipe()
+			fcntl.fcntl(self.ReqAck, fcntl.F_SETFL, fcntl.fcntl(self.ReqAck, fcntl.F_GETFL) | os.O_NONBLOCK)
+			self.Poll.register(self.ReqAck,select.POLLIN)
+			self.ReqAckFile = os.fdopen(self.ReqAck)
+		def handle_request(self, reqtimeout=60):
 			timeout = self.socket.gettimeout()
 			if timeout is None:
-				timeout = self.timeout
-			elif self.timeout is not None:
-				timeout = min(timeout, self.timeout)
-			# Convert float seconds to integer milliseconds
-			if timeout is not None:
-				timeout = round(timeout*1000)
-			
+				timeout = reqtimeout
+			elif reqtimeout is not None:
+				timeout = min(timeout, reqtimeout)
 			# Poll all sockets
 			while True:
+				pollStart = time.time()
+				# Cleanup unsuccessful connections
+				for SockFD, Req in self.PendingRequest.items():
+					if Req.close_connection:
+						del self.PendingRequest[SockFD]
+						Req.teardown(False)
+				for SockFD, Req in self.AcceptRequest.items():
+					del self.AcceptRequest[SockFD]
+					self.RequestTable[SockFD] = Req
+					self.Poll.register(SockFD,select.POLLIN)
+					self.Log.Info("[%s] Connection accepted (%d connected, %d pending)"%("%s:%s"%Req.client_address,len(self.RequestTable),len(self.PendingRequest)))
 				try:
-					RSocks = map(lambda entry: entry[0],self.Poll.poll(timeout))
+					RSocks = map(lambda entry: entry[0],self.Poll.poll(1000))
 				except (OSError, select.error) as e:
 					if e.args[0] != errno.EINTR:
 						raise
-					continue
+				if self.ReqAck in RSocks:
+					RSocks.remove(self.ReqAck)
+					# Silence the service bell
+					self.ReqAckFile.read()
+				if len(RSocks) == 0:
+					timeout -= time.time() - pollStart
+					if timeout > 0:
+						continue
 				break
 			# Serve connection request
 			if self.SockFD in RSocks:
@@ -305,14 +356,14 @@ if PlatformOps.PLATFORM == 'Linux':
 				Client.ServeRequest()
 				if Client.close_connection:
 					ServeDone.append(SockFD)
-			# Clean up finished request connections
+			# Cleanup finished request connections
 			for SockFD in ServeDone:
-				self.RequestTable[SockFD].teardown()
+				self.RequestTable[SockFD].teardown(True)
 		def process_request(self,request,client_address):
 			Client = self.RequestHandlerClass(request,client_address,self)
-			self.Log.Info("Accepted connection from %s:%s (%d connected)"%(client_address[0],client_address[1],len(self.RequestTable)))
+			self.Log.Info("Accepting connection from %s (%d connected, %d pending)"%("%s:%s"%client_address,len(self.RequestTable),len(self.PendingRequest)))
 		def close_handler(self,handler):
-			self.Log.Info("Shutdown connection from %s:%s (%d connected)"%(handler.client_address[0],handler.client_address[1],len(self.RequestTable)))
+			self.Log.Info("Shutdown connection from %s (%d connected, %d pending)"%("%s:%s"%handler.client_address,len(self.RequestTable),len(self.PendingRequest)))
 			self.shutdown_request(handler.request)
 		def implement_command(self,method,func):
 			self.CommandHandlers[method] = func
